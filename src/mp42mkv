@@ -1,0 +1,128 @@
+#!/bin/bash
+
+source /usr/local/include/scriptfunc
+
+VIDIN=""
+VIDOUT=""
+SUBFILE=""
+
+len() {
+	#echo -e "\tlen()\t Input: $1"
+	local STRING=$1
+	local LENGTH=${#STRING}
+	echo ${LENGTH}
+}
+
+getlang() {
+	__MYLANG="und"
+	for __SUBLANG in Eng:eng English:eng Spa:spa Esp:spa Spanish:spa Espanol:spa;do
+		__MLANG=`echo ${__SUBLANG} | cut -f1 -d:`
+		__CLANG=`echo ${__SUBLANG} | cut -f2 -d:`
+		__TOSS=`echo $1 | grep "${__MLANG}"`
+		__RES="$?"
+		if [[ ${__RES} -eq 0 ]];then
+			__MYLANG="${__CLANG}"
+		fi
+	done
+	echo "${__MYLANG}"
+}
+
+printcmd() {
+	echo -e;echo -e
+	MYCMD=`echo ${FULLCMD} | sed -e 's/--/#/g'`
+	
+	OIFS=${IFS}
+	IFS='#'
+
+	__IDX=0
+	for ENTRY in ${MYCMD};do
+		if [[ ${__IDX} -eq 0 ]];then
+			echo ${ENTRY}
+		else
+			echo "  --${ENTRY}"
+		fi
+		__IDX=`expr ${__IDX} + 1`
+	done
+	IFS=${OIFS}
+	echo -e
+}
+
+VIDIN=`find . -maxdepth 1 -type f -iname "*.mp4" | sed -e 's/^\.\///g'`
+if [[ ${VIDIN} != "" ]];then
+	echo -e ""
+	VIDOUT=`echo -e "${VIDIN}" | sed -e 's/mp4/mkv/g'`
+	echo -e "Input:\t\t${VIDIN}"
+	echo -e "Output:\t\t${VIDOUT}"
+
+	CMD="mkvmerge -v --output \""${VIDOUT}\"" --language 0:und --language 1:eng \"(\" \"${VIDIN}\" \")\""
+	TRKORD="0:0,0:1"
+
+	# Find and add .idx subtitles
+	SUBCMD=""
+	__SUBFILE=""
+	__IDX=0
+	for __SUBFILE in `find . -type f -iname "*idx" | sed -e 's/^\.\///g'`;do
+		if [[ ${__SUBFILE} != "" ]];then
+			__IDX=`expr ${__IDX} + 1`
+			__FNAME=$(basename -- "${__SUBFILE}")
+			__FEXT="${__FNAME##.}"
+			__IDLANG=`cat ${__SUBFILE} | grep -E "^id" | sed -e 's/^id: //g' | cut -f1 -d,`
+			#id: en, index: 0
+			if [[ ${__IDLANG} -eq "en" ]];then
+				__SLANG="eng"
+			else
+				__SLANG="und"
+			fi
+			SUBCMD="${SUBCMD} --language 0:${__SLANG} \"(\" \"${__SUBFILE}\" \")\""
+			TRKORD="${TRKORD},${__IDX}:0"
+		fi
+	done
+
+	# Find and add .srt subtitles
+	__SUBFILE=""
+	for __SUBFILE in `find . -type f -iname "*srt" | sed -e 's/^\.\///g'`;do
+		if [[ ${__SUBFILE} != "" ]];then
+			__IDX=`expr ${__IDX} + 1`
+			__FNAME=$(basename -- "${__SUBFILE}")
+			#__FNAME=`basename ${__SUBFILE}`
+			__FEXT="${__FNAME##.}"
+			__SLANG=`getlang "${__FNAME}"`
+			__STRLEN=`len ${__SUBLIST}`
+			SUBCMD="${SUBCMD} --language 0:${__SLANG} \"(\" \"${__SUBFILE}\" \")\""
+			TRKORD="${TRKORD},${__IDX}:0"
+		fi
+	done
+	
+	FULLCMD="${CMD} ${SUBCMD} --track-order ${TRKORD}"
+	printcmd
+
+	#exit 0
+
+	eval "${FULLCMD}"
+	RESULT=$?
+	echo -e "Result: ${RESULT}"
+	if [[ -f "${VIDOUT}" ]];then
+		echo -e
+		echo -e "Removing original video:\t\"${VIDIN}\""
+		rm -f "${VIDIN}"
+		echo -e "Setting ownership on:\t\t\"${VIDOUT}\" to plex."
+		sudo chown -R plex:media *
+	fi
+	echo -e
+	ls --color -l
+fi
+exit ${RESULT}
+
+
+
+
+
+mkvmerge \
+		--ui-language en \
+		--output 'Ballerina.2016.1080p.BluRay.H264.AAC-RARBG.mkv' \
+		--language 0:und \
+		--language 1:eng "(" "Ballerina.2016.1080p.BluRay.H264.AAC-RARBG.mp4" ")" \
+		--language 0:eng "(" "Subtitles\Ballerina.2016.1080p.BluRay.H264.AAC-RARBG.idx" ")" \
+		--language 0:eng "(" "Subtitles\2_Eng.srt" ")" \
+		--language 0:eng "(" "Subtitles\3_Eng.srt" ")" \
+		--track-order 0:0,0:1,1:0,2:0,3:0

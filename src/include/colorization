@@ -1,0 +1,56 @@
+colorize() {
+	if [[ ${TERM} == "xterm" ]];then
+	    # Normal Colors
+	    __BLA="\E[38;5;0m"                  # Black on Black background
+	    __YEL="\E[38;5;11m"                 # Yellow on Black background
+	    __MAG="\E[38;5;13m"                 # Magenta on Black background
+	    __WHT="\E[38;5;15m"                 # White on Black background
+	    __BLU="\E[38;5;21m"                 # Blue on Black background
+	    __GRE="\E[38;5;46m"                 # Green on Black background
+	    __CYA="\E[38;5;87m"                 # Cyan on Black background
+	    __PUR="\E[38;5;93m"                 # Magenta on Black background
+	    __LPU="\E[38;5;183m"                # Light Purple on Black background
+	    __RED="\E[38;5;196m"                # Red on Black background
+	    __ORA="\E[38;5;208m"                # Orange on Black background
+
+	    # Inverse Colors
+	    __iBLA="\E[48;5;0m"                 # Black on Black background
+	    __iYEL="\E[48;5;11m"                # Black on Yellow background
+	    __iMAG="\E[48;5;13m"                # Black on Magenta background
+	    __iWHT="\E[48;5;15m"                # Black on White background
+	    __iBLU="\E[48;5;21m"                # Black on Blue background
+	    __iGRE="\E[48;5;46m"                # Black on Green background
+	    __iCYA="\E[48;5;87m"                # Black on Cyan background
+	    __iPUR="\E[48;5;93m"                # Black on Purple background
+	    __iLPU="\E[38;5;183m"               # Black on Light Purple background
+	    __iRED="\E[48;5;196m"               # Black on Red background
+	    __iORA="\E[48;5;208m"               # Black on Orange background
+
+	    # Unset Colors
+	    __NC="\E[0m"            # No colorization
+	else
+	    __BLA=""
+	    __YEL=""
+	    __MAG=""
+	    __WHT=""
+	    __BLU=""
+	    __GRE=""
+	    __CYA=""
+	    __PUR=""
+	    __LPU=""
+	    __RED=""
+	    __ORA=""
+	    __iBLA=""
+	    __iYEL=""
+	    __iMAG=""
+	    __iWHT=""
+	    __iBLU=""
+	    __iGRE=""
+	    __iCYA=""
+	    __iPUR=""
+	    __iLPU=""
+	    __iRED=""
+	    __iORA=""
+	    __NC=""
+	fi
+}

@@ -1,0 +1,109 @@
+#!/bin/bash
+source /usr/local/include/ifsfix
+source /usr/local/include/colorization
+
+colorize
+
+NULL="/dev/null"
+DEVNULL=${NULL}
+_EXTS='3gp
+asf
+avi
+jpg
+mkv
+mp4
+mov
+png
+wmv'
+
+lds() {
+	for DIR in `ls`;do
+		if [[ -d ${DIR} ]];then
+			echo ${DIR}
+		fi
+	done
+}
+
+lfs() {
+	for FILE in `ls`;do
+		if [[ -f ${FILE} ]];then
+			echo ${FILE}
+		fi
+	done
+}
+
+createtext() {
+	for DIR in `lds`;do
+		touch ${DIR}/tmpfile.txt
+	done
+}
+
+removetext() {
+	rm -f */tmpfile.txt
+}
+
+timedate() {
+    TIMEDATE=`date +%R:%S`
+    echo -en "\t${__PUR}[${__ORA}${TIMEDATE}${__PUR}]\t"
+}
+
+pytimedate() {
+    TIMEDATE=`date +%R:%S' '%p`
+    echo -en "${__GRE}(${__ORA}${TIMEDATE}${__GRE})\t:INFO\t:script\t\t:\t"
+}
+
+check_dir() {
+	if [[ ! -z $1 ]];then
+		DIR=$1
+    	if [[ ! -d ${DIR} ]];then
+			mkdir -p ${DIR}
+		fi
+	else
+		echo -e "`timedate`Usage: ${__ORA}$0 ${__BLU}{directory}${__NC}"
+	fi
+}
+
+check_lock() {
+    LOCKED=0
+	if [[ -z ${LOCKFILE} ]];then
+		if [[ ! -z $1 ]];then
+    		LOCKFILE="$1.lock"
+		else
+			echo -e "`timedate`Usage: ${__ORA}$0 ${__BLU}{lockfile}${__NC}"
+		fi
+	fi
+
+    if [[ -e ${LOCKFILE} ]];then
+        LOCKED=1
+    else
+        echo -e "`timedate`Locking file:\t${__BLU}${FILE}${__NC}"
+        echo `hostname` > ${LOCKFILE}
+    fi
+}
+
+clean_lock() {
+	if [[ -z ${LOCKFILE} ]];then
+		if [[ ! -z $1 ]];then
+			LOCKFILE=$1
+    		echo -e "`timedate`Cleaning lock file:\t${__BLU}${LOCKFILE}${__NC}"
+    		rm -f ${LOCKFILE}
+		else
+			echo -e "`timedate`Usage: ${__ORA}$0 ${__BLU}{lockfile}${__NC}"
+		fi
+	else
+    	echo -e "`timedate`Cleaning lock file:\t${__BLU}${LOCKFILE}${__NC}"
+    	rm -f ${LOCKFILE}
+	fi
+}
+
+_fixperms() {
+	#_COUNT=0
+	#_TOTAL=$(find . -maxdepth 1 -type f -iname "*${_EXT}" | sed -e 's/^\.\///g' | sort -u | wc -l)
+	for _EXT in ${_EXTS};do
+		for _FILE in `find . -maxdepth 1 -type f -iname "*${_EXT}" | sed -e 's/^\.\///g' | sort -u`;do
+			#_COUNT=$(expr ${_COUNT} + 1)
+			#echo -e "\t`timedate`${__ORA}(${__YEL}${_COUNT}${_PUR}/${__GRE}${_TOTAL}${__ORA})\t${__PUR}${_FILE}${__NC}"
+			chmod 664 ${_FILE}
+		done
+	done
+}

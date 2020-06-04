@@ -1,0 +1,4 @@
+OIFS=${IFS}
+NIFS='
+'
+IFS=${NIFS}
