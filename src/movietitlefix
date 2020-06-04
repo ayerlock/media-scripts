@@ -1,0 +1,616 @@
+#!/usr/bin/python3
+# coding: utf-8
+###--- Module Imports ------------------------------------------------------------------------------------------------------------
+import		argparse
+import		logging
+import		os
+import		re
+import		sys
+import		logops
+###-------------------------------------------------------------------------------------------------------------------------------
+sys.setrecursionlimit(5000)
+###-------------------------------------------------------------------------------------------------------------------------------
+def argparser():
+	global	Logger
+	_ProgArgs = argparse.ArgumentParser( description = 'A bittorrent filename corrector.', prog = os.path.basename(re.sub(".py", "", sys.argv[0])) )
+	_ProgArgs.add_argument( '-d',	'--directory',	action = 'store',	dest = "directory",	metavar = "directory" )
+	_gProgArgs = _ProgArgs.add_argument_group( 'Standard Functionality' )
+	_gProgArgs.add_argument(		'--dryrun',		action = 'store_true' )
+	_gProgArgs.add_argument( '-v',	'--verbose',	action = 'count',	default = 1 )
+	_gProgArgs.add_argument(		'--version',	action = 'version',	version = '%(prog)s 0.1' )
+	_gProgArgs = _ProgArgs.add_argument_group( 'Logging Options' )
+	_gProgArgs.add_argument(		'--loglevel',	action = 'store',	dest = "loglevel",	metavar = "logging level",	default = 'info',	choices = ['crit', 'error', 'warn', 'notice', 'info', 'verbose', 'debug', 'insane'] )
+	_gProgArgs.add_argument(		'--logfile',	action = 'store',	dest = "logfile",	metavar = "logfile" )
+   
+	ProgArgs										= _ProgArgs.parse_args()
+	Logger											= initLog( ProgArgs.loglevel, ProgArgs.logfile )
+   
+	#ProgArgs.dryrun = True
+	return ProgArgs
+###------------------------------------------------------------------------------------------------------------------------------
+def initLog( LLevel, LogFile = None, module = None ):
+	initLogger										= logging.getLogger( __name__ )
+	LogLevels = {'crit':logging.CRITICAL,
+				'error':logging.ERROR,
+				'warn':logging.WARNING,
+				'info':logging.INFO,
+				'debug':logging.DEBUG }
+	LogLevel										= LogLevels.get( LLevel, logging.NOTSET )
+	initLogger.setLevel( LogLevel )
+	LogFormat										= '(%(asctime)-11s)  :%(levelname)-9s:%(funcName)-13s:%(message)s'
+	if ( len( initLogger.handlers ) == 0 ):
+		try:
+			Colorize								= __import__( 'logutils.colorize', fromlist=['colorize'] )
+			LogHandler								= Colorize.ColorizingStreamHandler()
+			LogHandler.level_map[logging.DEBUG]		= (None, 'blue', False)
+			LogHandler.level_map[logging.INFO]		= (None, 'green', False)
+			LogHandler.level_map[logging.WARNING]	= (None, 'yellow', False)
+			LogHandler.level_map[logging.ERROR]		= (None, 'red', False)
+			LogHandler.level_map[logging.CRITICAL]	= ('red', 'white', False)
+		except ImportError:
+			LogHandler	= logging.StreamHandler()
+	else:
+		LogHandler	= logging.StreamHandler()
+	LogHandler.setFormatter( logging.Formatter( LogFormat, datefmt='%I:%M:%S %p' ) )
+	initLogger.addHandler( LogHandler )
+	if LogFile:
+		LogFHandler									= logging.FileHandler( LogFile )
+		LogFHandler.setLevel( 'DEBUG' )
+		LogFHandler.setFormatter( logging.Formatter( LogFormat, datefmt='%I:%M:%S %p' ) )
+		initLogger.addHandler( LogFHandler )
+	return initLogger
+###-------------------------------------------------------------------------------------------------------------------------------
+class CaseInsensitive( object ):
+	def __init__( self, oriString ):
+		self.lowString = self.oriString.lower()
+		
+	def __hash__( self ):
+		return hash( self.lowString )
+	
+	def __eq__( self, other):
+		# ensure proper comparison between instances of this class
+		try: other = other.lowString
+		except ( TypeError, AttributeError ):
+			try: other = other.lower()
+			except: pass
+		return self.lowString == other
+###-------------------------------------------------------------------------------------------------------------------------------
+class Namespace( dict ):
+	"""A dict subclass that exposes its items as attributes.
+	Warning: Namespace instances do not have direct access to the
+	dict methods.
+	"""
+	def __init__( self, obj={} ):
+		super( Namespace, self ).__init__( obj )
+	def __dir__( self ):
+		#return tuple( self )
+		return list( self )
+	def __repr__( self ):
+		return "%s(%s)" % ( type( self ).__name__, super( Namespace, self ).__repr__() )
+	def __getattribute__( self, name ):
+		try:
+			return self[ name ]
+		except KeyError:
+			msg = "'%s' object has no attribute '%s'"
+			raise AttributeError( msg % ( type( self ).__name__, name ) )
+	def __setattr__( self, name, value ):
+		self[name]						= value
+	def __delattr__( self, name ):
+		del self[name]
+		
+	#- copy constructors ------------------
+	@classmethod
+	def from_object( cls, obj, names = None ):
+		if names is None:
+			names = dir( obj )
+		ns = { name:getattr( obj, name ) for name in names }
+		return cls( ns )
+	@classmethod
+	def from_mapping( cls, ns, names = None ):
+		if names:
+			ns = { name:ns[name] for name in names }
+		return cls( ns )
+	@classmethod
+	def from_sequence( cls, seq, names = None ):
+		if names:
+			seq = { name:val for name, val in seq if name in names }
+		return cls( seq )
+	
+	#- static methods ---------------------
+	@staticmethod
+	def hasattr( ns, name ):
+		try:
+			object.__getattribute__( ns, name )
+		except AttributeError:
+			return False
+		return True
+	@staticmethod
+	def getattr( ns, name ):
+		return object.__getattribute__( ns, name )
+	@staticmethod
+	def setattr( ns, name, value ):
+		return object.__setattr__( ns, name, value )
+	@staticmethod
+	def delattr(ns, name):
+		return object.__delattr__( ns, name )
+	#--------------------------------------
+###-------------------------------------------------------------------------------------------------------------------------------
+def procName( _item ):
+	_bracketRE										= re.compile( "\[.*\]" )
+	if _bracketRE.search( _item.name ):
+		tBracketItem								= re.sub( ".*\[", "", _item.name )
+		tBracketItem								= re.sub( "\].*", "", tBracketItem )
+		_item.brackets								= tBracketItem
+		_iName										= re.sub( "\[.*\]", "", _item.name )
+	else:
+		_iName										= _item.name
+		_item.brackets								= None
+		
+	_iName											= re.sub( "^ +", "", _iName )
+	_iName											= re.sub( " +$", "", _iName )
+	_iName											= re.sub( "\.", " ", _iName )
+	_iName											= re.sub( " +", " ", _iName )
+	_item.name										= _iName
+	return _item
+###-------------------------------------------------------------------------------------------------------------------------------
+def check3d( _item ):
+	_sbsREa											= re.compile( "[Hh]-[Ss][Bb][Ss]" )
+	_sbsREb											= re.compile( "[Hh][Aa][Ll][Ff][-\.][Ss][Bb][Ss]" )
+	_sbsREc											= re.compile( "[Hh][Aa][Ll][Ff][Ss][Bb][Ss]" )
+	_sbsREd											= re.compile( "[Hh][Ss][Bb][Ss]" )
+	if _sbsREa.findall( _item.name ):
+		return True
+	elif _sbsREb.findall( _item.name ):
+		return True
+	elif _sbsREc.findall( _item.name ):
+		return True
+	elif _sbsREd.findall( _item.name ):
+		return True
+	else:
+		return False
+###-------------------------------------------------------------------------------------------------------------------------------
+def dirTitle( _item ):
+	# Find the year of the media if possible.
+	#Logger.debug( "Processing:\t%s" % _item )
+	_yearCount										= 0
+	_matchYear										= False
+	_yearRE											= re.compile( "\d{4}" )
+
+	if _yearRE.findall( _item.name ):
+		for tYear in _yearRE.findall( _item.name ):
+			if ( tYear > "1900" ) and ( tYear <= "2025" ):
+				_yearCount							+= 1
+		if ( _yearCount == 0 ):
+			_item.year								= None
+			_matchYear								= False
+		elif ( _yearCount == 1 ):
+			for tYear in _yearRE.findall( _item.name ):
+				if ( tYear > "1900" ) and ( tYear < "2025" ):
+					_item.year						= tYear
+					_matchYear						= True
+		elif ( _yearCount > 1 ):
+			for tYear in _yearRE.findall( _item.name ):
+				if ( tYear > "1900" ) and ( tYear < "2025" ):
+					_item.year						= tYear
+					_matchYear						= True
+		if ( _yearCount == 0 ):
+			Logger.error( "No year data found in title.  Please resolve." )
+			Logger.error( _item )
+			sys.exit(3)
+
+	if ProgArgs.verbose >= 3:
+		Logger.debug( "Found Year: %s" % ( _item.year ) )
+
+	# Find the name of the media if possible.
+	if _matchYear:
+		tHead										= re.split( _item.year, _item.name )[0]
+		tTail										= re.split( _item.year, _item.name )[1]
+		
+		tHead										= re.sub( "3[Dd]", "", tHead )
+		tHead										= re.sub( "\.", " ", tHead )
+		tHead										= re.sub( " \[", "", tHead )
+		tHead										= re.sub( " \(", "", tHead )
+		tHead										= re.sub( " +", " ", tHead )
+		tHead										= re.sub( "^ ", "", tHead )
+		tHead										= re.sub( " +$", "", tHead )
+		tHead										= lower_article( tHead )
+		tHead										= re.sub( "^ ", "", tHead )
+		tHead										= re.sub( " +$", "", tHead )
+		
+		_item.title									= tHead
+
+		if ProgArgs.verbose >= 3:
+			Logger.debug( "Title Head: %s" % ( tHead ) )
+		if ProgArgs.verbose >= 3:
+			Logger.debug( "Title Tail: %s" % ( tTail ) )
+
+		if ( "2160p" in tTail ):
+			_item.resolution						= "2160p"
+		elif ( "1080p" in tTail ):
+			_item.resolution						= "1080p"
+		elif ( "720p" in tTail ):
+			_item.resolution						= "720p"
+		elif ( "480p" in tTail ):
+			_item.resolution						= "480p"
+		else:
+			_item.resolution						= None
+		if check3d( _item ):
+			_item.resolution						= ( "[H-SBS] %s" % ( _item.resolution ) )
+	else:
+		_item.title									= _item.name
+		_item.year									= None
+
+	if ProgArgs.verbose >= 3:
+		Logger.debug( "Found Year: %s" % ( _item.year ) )
+
+			
+	return _item
+###-------------------------------------------------------------------------------------------------------------------------------
+def resub_lower( match ):
+	try:
+		grpLower									= match.group().lower()
+	except IndexError as e:
+		grpLower									= match.group()
+	return grpLower
+###-------------------------------------------------------------------------------------------------------------------------------
+def resub_upper( match ):
+	try:
+		grpUpper									= match.group().upper()
+	except IndexError as e:
+		grpUpper									= match.group()
+	return grpUpper
+###-------------------------------------------------------------------------------------------------------------------------------
+def lower_article( title ):
+	for _article in "A", "An", "The":
+		if re.match( "%s " % ( _article ), title ):
+			title									= re.sub( ( "^%s " % ( _article ) ), "", title )
+			title									= re.sub( "$", ( ", %s" % ( _article ) ), title )
+	for _article in "A", "An", "The":
+		lowArticle									= ( " %s " % ( _article ) )
+		title										= re.sub( lowArticle, resub_lower, title )
+	for _conjunction in "And", "But", "Or", "For", "Nor":
+		lowArticle									= ( " %s " % ( _conjunction ) )
+		title										= re.sub( lowArticle, resub_lower, title )
+	for _preposition in "As", "At", "By", "For", "In", "On", "Of", "To", "Up":
+		lowArticle									= ( " %s " % ( _preposition ) )
+		title										= re.sub( lowArticle, resub_lower, title )
+	#Logger.info( "Title:\t%s" % ( title ) )
+	return title
+###-------------------------------------------------------------------------------------------------------------------------------
+def fix_special( title ):
+	Keys											= ["1","2"]
+	bValues											= ["Ncis","Greys"]
+	spValues										= ["NCIS","Grey's"]
+	bDict											= dict( zip( Keys, bValues ) )
+	spDict											= dict( zip( Keys, spValues ) )
+	for Key, bValue in bDict.iteritems():
+		title										= re.sub( bDict[Key], spDict[Key], title )
+	#Logger.info( "Title:\t%s" % ( title ) )
+	return title
+###-------------------------------------------------------------------------------------------------------------------------------
+def fileMove( fType, dstDir ):
+	success											= False
+	lExtRE											= ( "\.%s$" % ( fType.lower() ) )
+	uExtRE											= ( "\.%s$" % ( fType.upper() ) )
+	for mFile in os.listdir( os.getcwd() ):
+		if os.path.isfile( mFile ):
+			if ( re.search( lExtRE, mFile ) ) or ( re.search( uExtRE, mFile) ):
+				newFile								= ( "%s/%s" % ( dstDir, mFile ) )
+				Logger.info( "\tMoving File:\t\"%s\"\tTo:\t\"%s\"" % ( mFile, newFile) )
+				if not ProgArgs.dryrun:
+					try:
+						os.rename( mFile, newFile )
+					except OSError as e:
+						print( "Error: %s" % ( e ) )
+						success						= False
+					else:
+						success						= True
+	return success
+###-------------------------------------------------------------------------------------------------------------------------------
+def chkDir( dir ):
+	if ( not os.path.isdir( dir ) ):
+		print( "\tMaking Dir:\t\"%s\"" % ( dir ) )
+		try:
+			os.mkdir( dir )
+		except OSError as e:
+			Logger.error( "Error: %s" % ( e ) )
+			success									= False
+		else:
+			success									= True
+	else:
+		success										= True
+	return success
+###-------------------------------------------------------------------------------------------------------------------------------
+def getYear( _item ):
+	year											= None
+	_yearCount										= 0
+	_matchYear										= False
+	_yearRE											= re.compile( "\d{4}" )
+
+	if _yearRE.findall( _item.name ):
+		for tYear in _yearRE.findall( _item.name ):
+			if ( tYear > "1900" ) and ( tYear <= "2025" ):
+				_yearCount							+= 1
+		if ( _yearCount == 0 ):
+			year									= None
+			_matchYear								= False
+		elif ( _yearCount == 1 ):
+			for tYear in _yearRE.findall( _item.name ):
+				if ( tYear > "1900" ) and ( tYear < "2025" ):
+					year							= tYear
+					_matchYear						= True
+		elif ( _yearCount > 1 ):
+			for tYear in _yearRE.findall( _item.name ):
+				if ( tYear > "1900" ) and ( tYear < "2025" ):
+					year							= tYear
+					_matchYear						= True
+		if ( _yearCount == 0 ):
+			Logger.error( "No year data found in title.  Please resolve." )
+			Logger.error( _item )
+			sys.exit(3)
+
+	if ProgArgs.verbose >= 3:
+		Logger.debug( "Found Year: %s" % ( year ) )
+	
+	return year
+###-------------------------------------------------------------------------------------------------------------------------------
+def getResolution( _item ):
+	resolution								= None
+	success									= False
+	_doBracket								= False
+	_idFile									= False
+	_matchYear								= False
+	_yearCount								= 0
+	_yearRE									= re.compile( "\d{4}" )
+	
+	Logger.debug( " :%s" % ( _item ) )
+	
+	if _item.year is not None:
+		tHead								= re.split( _item.year, _item.name )[0]
+		tTail								= re.split( _item.year, _item.name )[1]
+		
+		tHead								= re.sub( "3[Dd]", "", tHead )
+		tHead								= re.sub( "\.", " ", tHead )
+		tHead								= re.sub( " \[", "", tHead )
+		tHead								= re.sub( " \(", "", tHead )
+		tHead								= re.sub( " +", " ", tHead )
+		tHead								= re.sub( "^ ", "", tHead )
+		tHead								= re.sub( " +$", "", tHead )
+		tHead								= lower_article( tHead )
+		tHead								= re.sub( "^ ", "", tHead )
+		tHead								= re.sub( " +$", "", tHead )
+		
+		title								= tHead
+
+	if ( "2160p" in tTail ):
+		resolution					= "2160p"
+	elif ( "1080P" in tTail ):
+		resolution					= "1080p"
+	elif ( "1080p" in tTail ):
+		resolution					= "1080p"
+	elif ( "720P" in tTail ):
+		resolution					= "720p"
+	elif ( "720p" in tTail ):
+		resolution					= "720p"
+	elif ( "480P" in tTail ):
+		resolution					= "480p"
+	elif ( "480p" in tTail ):
+		resolution					= "480p"
+	else:
+		resolution					= None
+	
+	return resolution
+###-------------------------------------------------------------------------------------------------------------------------------
+def getTitle( _item ):
+	title									= None
+	success									= False
+	_doBracket								= False
+	_idFile									= False
+	_matchYear								= False
+	_yearCount								= 0
+	_yearRE									= re.compile( "\d{4}" )
+	
+	if _item.year is not None:
+		tHead								= re.split( _item.year, _item.name )[0]
+		tTail								= re.split( _item.year, _item.name )[1]
+		
+		tHead								= re.sub( "3[Dd]", "", tHead )
+		tHead								= re.sub( "\.", " ", tHead )
+		tHead								= re.sub( " \[", "", tHead )
+		tHead								= re.sub( " \(", "", tHead )
+		tHead								= re.sub( " +", " ", tHead )
+		tHead								= re.sub( "^ ", "", tHead )
+		tHead								= re.sub( " +$", "", tHead )
+		tHead								= lower_article( tHead )
+		tHead								= re.sub( "^ ", "", tHead )
+		tHead								= re.sub( " +$", "", tHead )
+		
+		# tHead should be the movie title and tTail should be everything else after the resolution
+		title								= tHead
+	else:
+		title								= _item.name
+		
+	return title
+###-------------------------------------------------------------------------------------------------------------------------------
+def getRelease( _item ):
+	release									= re.split( _item.resolution, _item.listing)[1]
+	release									= re.sub( "^.", "", release )
+	Logger.debug( release )
+	return release
+###-------------------------------------------------------------------------------------------------------------------------------
+def dirProcess( _item ):
+	Logger.debug( " Processing: %s" % ( _item.name ) )
+	#if ProgArgs.verbose > 5:
+	#	Logger.debug( " :%s" % ( _item ) )
+	_item									= procName( _item )
+	#if ProgArgs.verbose > 5:
+	#	Logger.debug( " procName: %s" % ( _item ) )
+	#_item											= dirTitle( _item )
+	#if ProgArgs.verbose > 5:
+	#	Logger.debug( " dirTitle: %s" % ( _item ) )
+
+	_doBracket								= False
+	_idFile									= False
+	success									= False
+	
+	if ( _item.brackets != None ):
+		for _bracketItem in "directors cut", "extended", "uncut", "unrated", "h-sbs", "half-sbs":
+			if _bracketItem in _item.brackets.lower():
+				_doBracket					= True
+
+	if ProgArgs.verbose >= 3:
+		for key in dir( _item ):
+			Logger.error( "Key: %s\tValue: %s" % ( key, getattr( _item, key ) ) )
+
+	
+	_item.year			= getYear( _item )
+	_item.resolution	= getResolution ( _item )
+	_item.title			= getTitle( _item )
+	_item.release		= getRelease( _item )
+	
+	if "resolution" in iter( dir( _item ) ):
+		if ( _item.resolution != None ):
+			if _doBracket:
+				Logger.info( "  Setting Title (1):\t\"%s (%s) [%s] %s\"" % ( _item.title, _item.year, _item.brackets, _item.resolution ) )
+				_item.directory					= ( "%s (%s)" % ( _item.title, _item.year ) )
+				#_item.title						= ( "%s (%s) [%s] %s" % ( _item.title, _item.year, _item.brackets, _item.resolution ) )
+			else:
+				Logger.info( "  Setting Title (2):\t\"%s (%s) %s\"" % ( _item.title, _item.year, _item.resolution ) )
+				_item.directory					= ( "%s (%s)" % ( _item.title, _item.year ) )
+				#_item.title						= ( "%s (%s) %s" % ( _item.title, _item.year, _item.resolution ) )
+		else:
+			Logger.info( "  Setting Title (3):\t\"%s (%s)\"" % ( _item.title, _item.year ) )
+			_item.directory						= ( "%s (%s)" % ( _item.title, _item.year ) )
+			#_item.title							= ( "%s (%s)" % ( _item.title, _item.year ) )
+	else:
+		if _item.year != None:
+			Logger.info( "  Setting Title (4):\t\"%s\"" % ( _item.title, _item.year ) )
+			_item.directory						= ( "%s" % ( _item.title, _item.year ) )
+		else:
+			Logger.info( "  Setting Title (5):\t\"%s\"" % ( _item.title ) )
+			_item.directory						= ( "%s" % ( _item.title ) )
+	
+	_item.blisting							= re.sub( " \[.*\]$", '', _item.listing )
+		
+	Logger.info( "\tTitle:\t\t\"%s\"" % ( _item.title ) )
+	Logger.info( "\tYear:\t\t\"%s\"" % ( _item.year ) )
+	Logger.info( "\tResolution:\t\"%s\"" % ( _item.resolution ) )
+	Logger.info( "\tRelease:\t\"%s\"" % ( _item.release ) )
+	Logger.info( "\tDirectory Name:\t\"%s\"" % ( _item.directory ) )
+	
+	
+	curDir									= os.getcwd()
+	nextDir									= ( "%s/%s" % ( os.getcwd(), _item.listing ) )
+	if ProgArgs.verbose > 3:
+		Logger.debug( "  Changing to directory: '%s'" % ( nextDir ) )
+	os.chdir( nextDir )
+	for mDir in "Info, Poster & Screens", "Subtitles":
+		chkDir( mDir )
+	for fType in "nfo", "txt":
+		dstDir								= "Info, Poster & Screens"
+		fileMove( fType, dstDir )
+	for fType in "idx", "srt", "sub":
+		dstDir								= "Subtitles"
+		fileMove( fType, dstDir )
+	fCount									= 0
+	for fType in "avi", "mkv", "mp4", "wmv":
+		lExtRE								= ( "\.%s$" % ( fType.lower() ) )
+		uExtRE								= ( "\.%s$" % ( fType.upper() ) )
+		for mFile in os.listdir( os.getcwd() ):
+			if os.path.isfile( mFile ):
+				if ( re.search( lExtRE, mFile ) ) or ( re.search( uExtRE, mFile) ):
+					fCount					+= 1
+		if ( fCount == 1 ):
+			for mFile in os.listdir( os.getcwd() ):
+				if os.path.isfile( mFile ):
+					if ( re.search( lExtRE, mFile ) ) or ( re.search( uExtRE, mFile) ):
+						_item.file					= ( "%s (%s) %s.%s.%s" % ( _item.title, _item.year, _item.resolution, _item.release, fType.lower() ) )
+						#fNewName					= ( "%s.%s" % ( _item.title, fType.lower() ) )
+						Logger.info( "\tFile Name:\t\"%s\"" % ( _item.file ) )
+						if ( mFile != _item.file ):
+							_idFile					= True
+							Logger.info( "\tMoving File:\t\"%s\"\tTo:\t\"%s\"" % ( mFile, _item.file ) )
+							if not ProgArgs.dryrun:
+								try:
+									os.rename( mFile, _item.file )
+								except OSError as e:
+									print( "Error: %s" % ( e ) )
+									success				= False
+		if ( not _idFile ):
+			fName							= ( "%s.%s" % ( _item.blisting, fType.lower() ) )
+			if os.path.isfile( fName ):
+				_item.file					= ( "%s.%s" % ( _item.title, fType.lower() ) )
+				if ( fName != _item.file ):
+					Logger.info( "\tMoving File:\t\"%s\"\tTo:\t\"%s\"" % ( fName, _item.file ) )
+				else:
+					Logger.info( "\tLeaving File:\t\"%s\"" % ( fName ) )
+			fName							= ( "%s.%s" % ( _item.blisting, fType.upper() ) )
+			if os.path.isfile( fName ):
+				_item.file					= ( "%s.%s" % ( _item.title, fType.lower() ) )
+				if ( fName != _item.file ):
+					Logger.info( "\tMoving File:\t\"%s\"\tTo:\t\"%s\"" % ( fName, _item.file ) )
+				else:
+					Logger.info( "\tLeaving File:\t\"%s\"" % ( fName ) )
+					
+	os.chdir( curDir )
+	
+	if not ProgArgs.dryrun:
+		try:
+			Logger.info( "  Renaming Directory: %s\t\tTo: %s" % ( _item.listing, _item.directory ) )
+			os.rename( _item.listing , _item.directory )
+		except OSError as e:
+			Logger.error( "Error: %s" % ( e ) )
+			success							= False
+		else:
+			success							= True
+	else:
+		Logger.info( "  Renaming Directory: '%s'\t\tTo: '%s'" % ( _item.listing, _item.directory ) )
+	print
+	return success
+###-------------------------------------------------------------------------------------------------------------------------------
+def fileProcess( _item ):
+	_fTypeRE										= re.compile( ".*(avi|idx|mkv|mp4|srt|sub|wmv)$" )
+	if ( _fTypeRE.search( _item.name ) ):
+		print( "\tFile:\t%s" % ( _item.name ) )
+###-------------------------------------------------------------------------------------------------------------------------------
+def main():
+	global	Logger
+	global	ProgArgs
+	#--- Parse program arguments -------------------------------------------------------------------
+	ProgArgs										= argparser()
+	Logger											= logops.initLog( ProgArgs.loglevel, ProgArgs.logfile )
+	#--- Set Initial Variables ---------------------------------------------------------------------
+	_success										= True
+	_cwd											= os.getcwd()
+	_skipRE											= re.compile( "zz" )
+	for _listing in sorted( os.listdir( _cwd ) ):
+		_item										= Namespace()
+		if not _skipRE.match( _listing ):
+			if ( _listing != "Subtitles" ) and ( _listing != "Info, Poster & Screens" ):
+				_item.listing						= _listing
+				if ProgArgs.verbose > 5:
+					Logger.debug( "Item:\t%s" % ( _item ) )
+				_item.name							= _listing
+				if ProgArgs.verbose > 5:
+					Logger.debug( "Item:\t%s" % ( _item ) )
+				_item.path							= os.path.abspath( _listing )
+				if ProgArgs.verbose > 5:
+					Logger.debug( "Item:\t%s" % ( _item ) )
+
+				if os.path.isdir( _listing ):
+					_item.type						= 'd'
+					dirProcess( _item )
+				elif os.path.isfile( _listing ):
+					_item.type						= 'f'
+					fileProcess( _item )
+			Logger.info( "" )
+			Logger.info( "" )
+			print( "" )
+			print( "" )
+			print( "" )
+	#--- Exit Gracefully ---------------------------------------------------------------------------
+	return	_success;
+###-------------------------------------------------------------------------------------------------------------------------------
+if __name__ == '__main__':
+	main()
+###-------------------------------------------------------------------------------------------------------------------------------

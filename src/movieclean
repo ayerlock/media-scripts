@@ -1,0 +1,85 @@
+#!/bin/bash
+
+OWNER="plex"
+GROUP="media"
+INFODIR="Info, Poster & Screens"
+SUBDIR="Subtitles"
+SAMPLEDIRS='Sample
+Proof'
+RELVIDS='ETRG.avi
+ETRG.mkv
+ETRG.mp4
+ETRG.mpg
+RARBG.COM.avi
+RARBG.COM.mkv
+RARBG.COM.mp4
+RARBG.com.mp4
+RARBG.COM.mpg'
+
+if [[ -f /usr/local/include/scriptfunc ]];then
+	source /usr/local/include/scriptfunc
+else
+	exit
+fi
+
+cleansamples() {
+	for SDIR in ${SAMPLEDIRS};do
+		if [[ -d ${SDIR} ]];then
+			rm -rf ${SDIR}
+		fi
+	done
+	for RFILE in ${RELVIDS};do
+		if [[ -f ${RFILE} ]];then
+			echo -e "  Removing non-movie video file: ${RFILE}"
+			rm -f ${RFILE}
+		fi
+	done
+	for XFILE in `find . -iname *.exe`;do
+		echo -e "  Removing executable file: ${XFILE}"
+		rm -f ${XFILE}
+	done
+}
+	
+
+subfix() {
+	if [[ -d "Subs" ]];then
+		echo -e "  Relocating subtitle files."
+		if [[ -d ${SUBDIR} ]];then
+			mv Subs/* Subtitles/
+			rmdir Subs
+		else
+			mkdir -p ${SUBDIR}
+			mv Subs/* Subtitles/
+			rmdir Subs
+		fi
+	fi
+}
+
+imagemove() {
+	for FILE in `find . -maxdepth 1 -iname "*jpg" -o -iname "*png" -o -iname "*.gif"`;do
+		RESULT=$?
+		if [[ ${RESULT} == 0 ]];then
+			echo -e "  Relocating images."
+			FILE=`echo ${FILE} | sed -r 's/^\.\///g'`
+			echo -e "\tMoving '${DIR}/${FILE}' to '${DIR}/${INFODIR}/`basename ${FILE}`'"
+			if [[ -d ${INFODIR} ]];then
+				mv ${FILE} "${INFODIR}/`basename ${FILE}`"
+			else
+				mkdir -p "${INFODIR}"
+				mv ${FILE} "${INFODIR}/`basename ${FILE}`"
+			fi
+		fi
+	done
+}
+
+for DIR in `lsdirs`;do
+	if [[ -d ${DIR} ]];then
+		echo -e "Fixing:\t'${DIR}'"
+		sudo chown -R ${OWNER}:${GROUP} "${DIR}"
+		cd ${DIR}
+		subfix
+		imagemove
+		cleansamples
+		cd ..
+	fi
+done
